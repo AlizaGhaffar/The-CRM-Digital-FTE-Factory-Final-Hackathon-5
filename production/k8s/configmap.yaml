@@ -1,0 +1,50 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — ConfigMap
+# Exercise 2.7
+#
+# Non-secret environment configuration for both API and Worker
+# pods. All actual secrets (passwords, API keys, credentials)
+# live in secrets.yaml.
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fte-config
+  namespace: customer-success-fte
+  labels:
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/part-of: nimbusflow
+data:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  POSTGRES_HOST: "postgres.customer-success-fte.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "fte_db"
+  POSTGRES_USER: "fte_user"
+
+  # ── Kafka ───────────────────────────────────────────────────
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.customer-success-fte.svc.cluster.local:9092"
+  KAFKA_AUTO_OFFSET_RESET: "earliest"
+
+  # ── API worker settings ─────────────────────────────────────
+  KAFKA_GROUP_ID_API: "fte-api"
+  KAFKA_GROUP_ID_WORKER: "fte-worker"
+  WORKER_MAX_RETRIES: "3"
+  WORKER_RETRY_BACKOFF: "2.0"
+
+  # ── Channel settings ────────────────────────────────────────
+  TWILIO_VALIDATE_SIGNATURE: "true"
+  TWILIO_WHATSAPP_NUMBER: "whatsapp:+14155238886"   # Update with your Twilio number
+
+  # ── Gmail / Pub/Sub ─────────────────────────────────────────
+  GMAIL_USER_ID: "me"
+  GMAIL_CREDENTIALS_PATH: "/app/secrets/gmail_credentials.json"
+  GMAIL_TOKEN_PATH: "/app/secrets/gmail_token.json"
+  PUBSUB_PROJECT_ID: "your-gcp-project-id"          # Update with GCP project
+  PUBSUB_TOPIC_NAME: "nimbusflow-gmail-push"         # Update with Pub/Sub topic
+
+  # ── API / CORS ──────────────────────────────────────────────
+  CORS_ORIGINS: "https://support.nimbusflow.io,https://www.nimbusflow.io"
+  DISABLE_TRACING: "false"
+
+  # ── AI model ────────────────────────────────────────────────
+  GEMINI_MODEL: "gemini-2.0-flash"

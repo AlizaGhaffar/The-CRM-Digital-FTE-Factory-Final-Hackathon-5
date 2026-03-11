@@ -1,0 +1,518 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Monitoring Configuration
+#
+# Requires: kube-prometheus-stack (Prometheus Operator)
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install kube-prometheus prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring --create-namespace
+#
+# Apply after kube-prometheus-stack is running:
+#   kubectl apply -f production/k8s/monitoring.yaml
+#
+# Verify alerts are loaded:
+#   kubectl get prometheusrule -n customer-success-fte
+#   kubectl get servicemonitor -n customer-success-fte
+# ============================================================
+
+# ── 1. ServiceMonitor ─────────────────────────────────────────────────────────
+#
+# Tells Prometheus Operator to scrape the fte-api pods' /metrics endpoint
+# every 15 seconds. Pods expose /metrics via prometheus-fastapi-instrumentator.
+#
+# Setup in production/api/main.py (add after app creation):
+#   from prometheus_fastapi_instrumentator import Instrumentator
+#   Instrumentator(
+#       should_group_status_codes=True,
+#       should_ignore_untemplated=True,
+#       should_instrument_requests_inprogress=True,
+#   ).instrument(app).expose(app)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fte-api
+  namespace: customer-success-fte
+  labels:
+    app: fte-api
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: nimbusflow
+    # Must match the Prometheus CR's serviceMonitorSelector label:
+    release: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: fte-api               # Matches service.yaml labels
+  namespaceSelector:
+    matchNames:
+      - customer-success-fte
+  endpoints:
+    - port: http                 # Matches service port name in service.yaml
+      path: /metrics
+      interval: 15s              # Scrape every 15 s
+      scrapeTimeout: 10s
+      honorLabels: true
+      relabelings:
+        # Add namespace label to all metrics for dashboard filtering
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        # Add pod name for per-pod drill-down
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        # Add component label
+        - targetLabel: component
+          replacement: api
+
+---
+
+# ── 2. PodMonitor for Worker pods ─────────────────────────────────────────────
+#
+# Worker pods do not expose HTTP. If you add a Prometheus metrics port to the
+# worker (e.g., start a metrics-only HTTP server on port 9090), uncomment and
+# update this PodMonitor. Included here as a placeholder.
+# ─────────────────────────────────────────────────────────────────────────────
+# apiVersion: monitoring.coreos.com/v1
+# kind: PodMonitor
+# metadata:
+#   name: fte-worker
+#   namespace: customer-success-fte
+#   labels:
+#     release: kube-prometheus
+# spec:
+#   selector:
+#     matchLabels:
+#       app: fte-worker
+#   podMetricsEndpoints:
+#     - port: metrics
+#       path: /metrics
+#       interval: 15s
+
+---
+
+# ── 3. PrometheusRule — Alert Rules ───────────────────────────────────────────
+#
+# Five alert groups covering all Final Challenge pass criteria:
+#   Group 1: fte.api.errors        — HTTP 5xx error rate > 5 %
+#   Group 2: fte.api.latency       — P95 response time > 3 s
+#   Group 3: fte.kafka.lag         — Consumer lag > 1000 messages
+#   Group 4: fte.pods              — Pod crash / restart loop
+#   Group 5: fte.business          — Escalation rate > 25 %
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fte-alerts
+  namespace: customer-success-fte
+  labels:
+    app: fte-api
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/part-of: nimbusflow
+    release: kube-prometheus    # Must match Prometheus CR's ruleSelector label
+spec:
+  groups:
+
+    # ── Group 1: HTTP Error Rate ─────────────────────────────────────────────
+    - name: fte.api.errors
+      interval: 30s
+      rules:
+
+        # Warning: error rate 2–5 %  → investigate before it escalates
+        - alert: FTEHighErrorRateWarning
+          expr: |
+            (
+              sum(rate(http_requests_total{
+                namespace="customer-success-fte",
+                status_code=~"5.."
+              }[5m]))
+              /
+              sum(rate(http_requests_total{
+                namespace="customer-success-fte"
+              }[5m]))
+            ) > 0.02
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            component: api
+          annotations:
+            summary: "FTE API error rate elevated ({{ $value | humanizePercentage }})"
+            description: >
+              HTTP 5xx error rate has been above 2% for 5 minutes.
+              Current rate: {{ $value | humanizePercentage }}.
+              Check pod logs: kubectl logs -l app=fte-api -n customer-success-fte --tail=100
+            runbook: "https://github.com/nimbusflow/runbook#high-error-rate"
+            dashboard: "http://grafana/d/nimbusflow-fte/customer-success-fte"
+
+        # Critical: error rate > 5 %  → SLO breach, page on-call
+        - alert: FTEHighErrorRateCritical
+          expr: |
+            (
+              sum(rate(http_requests_total{
+                namespace="customer-success-fte",
+                status_code=~"5.."
+              }[5m]))
+              /
+              sum(rate(http_requests_total{
+                namespace="customer-success-fte"
+              }[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            component: api
+            page: "true"
+          annotations:
+            summary: "CRITICAL: FTE API error rate > 5% ({{ $value | humanizePercentage }})"
+            description: >
+              HTTP 5xx error rate has been above 5% for 5 minutes — SLO breach imminent.
+              Current rate: {{ $value | humanizePercentage }}.
+              Immediate action required.
+            runbook: "https://github.com/nimbusflow/runbook#high-error-rate"
+
+        # Webhook-specific: channel intake errors
+        - alert: FTEWebhookErrors
+          expr: |
+            sum by (handler) (
+              rate(http_requests_total{
+                namespace="customer-success-fte",
+                handler=~".*/webhooks/.*",
+                status_code=~"5.."
+              }[5m])
+            ) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            component: api
+          annotations:
+            summary: "FTE webhook endpoint errors on {{ $labels.handler }}"
+            description: >
+              Webhook handler {{ $labels.handler }} is returning 5xx errors.
+              Customer messages may be lost. Check handler and upstream integrations.
+
+    # ── Group 2: Latency ─────────────────────────────────────────────────────
+    - name: fte.api.latency
+      interval: 30s
+      rules:
+
+        # Warning: P95 > 2 s (early warning before Final Challenge threshold)
+        - alert: FTEHighLatencyWarning
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(http_request_duration_seconds_bucket{
+                namespace="customer-success-fte"
+              }[5m])) by (le)
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            component: api
+          annotations:
+            summary: "FTE API P95 latency > 2s ({{ $value | humanizeDuration }})"
+            description: >
+              P95 response time has been above 2 seconds for 5 minutes.
+              Current P95: {{ $value | humanizeDuration }}.
+              Final Challenge threshold is 3 s — investigate before SLO breach.
+            runbook: "https://github.com/nimbusflow/runbook#high-latency"
+
+        # Critical: P95 > 3 s  → Final Challenge SLO breach
+        - alert: FTEHighLatencyCritical
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(http_request_duration_seconds_bucket{
+                namespace="customer-success-fte"
+              }[5m])) by (le)
+            ) > 3
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            component: api
+            page: "true"
+          annotations:
+            summary: "CRITICAL: FTE P95 latency > 3s — Final Challenge SLO breach"
+            description: >
+              P95 response time has exceeded 3 seconds for 5 minutes.
+              Current P95: {{ $value | humanizeDuration }}.
+              This fails the Final Challenge uptime/latency requirement.
+            runbook: "https://github.com/nimbusflow/runbook#high-latency"
+
+        # Per-endpoint latency: webhook handlers must be fast (Pub/Sub timeout = 30s)
+        - alert: FTEWebhookLatencyHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(http_request_duration_seconds_bucket{
+                namespace="customer-success-fte",
+                handler=~".*/webhooks/.*"
+              }[5m])) by (le, handler)
+            ) > 25
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            component: api
+          annotations:
+            summary: "FTE webhook {{ $labels.handler }} P95 > 25s — Pub/Sub timeout risk"
+            description: >
+              Webhook handler {{ $labels.handler }} P95 latency is {{ $value | humanizeDuration }}.
+              Google Pub/Sub will retry after 30s — risk of duplicate message processing.
+
+    # ── Group 3: Kafka Consumer Lag ──────────────────────────────────────────
+    - name: fte.kafka.lag
+      interval: 60s
+      rules:
+
+        # Warning: lag growing — worker may be falling behind
+        - alert: FTEKafkaConsumerLagWarning
+          expr: |
+            sum by (topic, consumergroup) (
+              kafka_consumergroup_lag{
+                namespace="customer-success-fte",
+                consumergroup=~"fte-.*"
+              }
+            ) > 500
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            component: kafka
+          annotations:
+            summary: "Kafka consumer lag growing on {{ $labels.topic }} ({{ $value }} msgs)"
+            description: >
+              Consumer group {{ $labels.consumergroup }} has a lag of {{ $value }} messages
+              on topic {{ $labels.topic }}.
+              Worker pods may need to scale — check HPA: kubectl get hpa -n customer-success-fte
+
+        # Critical: lag > 1000 — messages queuing up, response SLA at risk
+        - alert: FTEKafkaConsumerLagCritical
+          expr: |
+            sum by (topic, consumergroup) (
+              kafka_consumergroup_lag{
+                namespace="customer-success-fte",
+                consumergroup=~"fte-.*"
+              }
+            ) > 1000
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            component: kafka
+            page: "true"
+          annotations:
+            summary: "CRITICAL: Kafka lag > 1000 on {{ $labels.topic }} ({{ $value }} msgs)"
+            description: >
+              Consumer group {{ $labels.consumergroup }} is {{ $value }} messages behind
+              on topic {{ $labels.topic }}.
+              Customers are waiting for responses. Worker pods need immediate scaling.
+              kubectl scale deployment fte-worker --replicas=10 -n customer-success-fte
+            runbook: "https://github.com/nimbusflow/runbook#kafka-consumer-lag"
+
+        # Dead letter queue growing — messages failing permanently
+        - alert: FTEDeadLetterQueueGrowing
+          expr: |
+            increase(
+              kafka_consumergroup_lag{
+                namespace="customer-success-fte",
+                topic=~".*\\.dlq"
+              }[30m]
+            ) > 5
+          labels:
+            severity: warning
+            team: platform
+            component: kafka
+          annotations:
+            summary: "FTE dead letter queue growing ({{ $value }} new messages in 30m)"
+            description: >
+              Messages are being sent to the DLQ — {{ $value }} in the last 30 minutes.
+              These messages failed after all retries. Check worker logs for errors.
+
+    # ── Group 4: Pod Health ──────────────────────────────────────────────────
+    - name: fte.pods
+      interval: 30s
+      rules:
+
+        # Pod in Failed/Unknown/OOMKilled state
+        - alert: FTEPodDown
+          expr: |
+            kube_pod_status_phase{
+              namespace="customer-success-fte",
+              phase=~"Failed|Unknown"
+            } == 1
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            component: kubernetes
+            page: "true"
+          annotations:
+            summary: "FTE pod {{ $labels.pod }} is {{ $labels.phase }}"
+            description: >
+              Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been in
+              {{ $labels.phase }} state for 2 minutes.
+              kubectl describe pod {{ $labels.pod }} -n customer-success-fte
+            runbook: "https://github.com/nimbusflow/runbook#pod-down"
+
+        # Restart loop — CrashLoopBackOff pattern
+        - alert: FTEPodRestartLoop
+          expr: |
+            increase(
+              kube_pod_container_status_restarts_total{
+                namespace="customer-success-fte"
+              }[15m]
+            ) > 3
+          labels:
+            severity: critical
+            team: platform
+            component: kubernetes
+            page: "true"
+          annotations:
+            summary: "FTE container {{ $labels.container }} restarting ({{ $value }}x in 15m)"
+            description: >
+              Container {{ $labels.container }} in pod {{ $labels.pod }} has restarted
+              {{ $value }} times in the last 15 minutes — likely CrashLoopBackOff.
+              kubectl logs {{ $labels.pod }} -c {{ $labels.container }} -n customer-success-fte --previous
+            runbook: "https://github.com/nimbusflow/runbook#crash-loop"
+
+        # Available replicas below desired — partial outage
+        - alert: FTEDeploymentReplicasMismatch
+          expr: |
+            (
+              kube_deployment_spec_replicas{
+                namespace="customer-success-fte",
+                deployment=~"fte-.*"
+              }
+              -
+              kube_deployment_status_replicas_available{
+                namespace="customer-success-fte",
+                deployment=~"fte-.*"
+              }
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            component: kubernetes
+          annotations:
+            summary: "FTE deployment {{ $labels.deployment }} has unavailable replicas"
+            description: >
+              Deployment {{ $labels.deployment }} has {{ $value }} unavailable replica(s)
+              for 5 minutes. Reduced capacity may impact P95 latency.
+              kubectl rollout status deployment/{{ $labels.deployment }} -n customer-success-fte
+
+        # OOMKilled
+        - alert: FTEContainerOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{
+              namespace="customer-success-fte",
+              reason="OOMKilled"
+            } == 1
+          labels:
+            severity: warning
+            team: platform
+            component: kubernetes
+          annotations:
+            summary: "FTE container {{ $labels.container }} was OOMKilled"
+            description: >
+              Container {{ $labels.container }} in pod {{ $labels.pod }} was killed due to
+              out-of-memory. Memory limits may need adjustment in deployment YAML.
+              Current limits: api=512Mi, worker=1Gi.
+
+    # ── Group 5: Business Metrics ────────────────────────────────────────────
+    - name: fte.business
+      interval: 60s
+      rules:
+
+        # Escalation rate > 25% — Final Challenge SLO
+        - alert: FTEHighEscalationRate
+          expr: |
+            (
+              sum(rate(fte_escalations_total{
+                namespace="customer-success-fte"
+              }[30m]))
+              /
+              sum(rate(fte_messages_processed_total{
+                namespace="customer-success-fte"
+              }[30m]))
+            ) > 0.25
+          for: 15m
+          labels:
+            severity: critical
+            team: product
+            component: agent
+            page: "true"
+          annotations:
+            summary: "CRITICAL: FTE escalation rate > 25% ({{ $value | humanizePercentage }})"
+            description: >
+              The agent is escalating more than 25% of conversations to human agents.
+              Current rate: {{ $value | humanizePercentage }} over the last 30 minutes.
+              This fails the Final Challenge threshold (< 25%).
+              Check knowledge base coverage and system prompt constraints.
+            runbook: "https://github.com/nimbusflow/runbook#high-escalation-rate"
+
+        # Warning at 20% — gives time to investigate before SLO breach
+        - alert: FTEEscalationRateWarning
+          expr: |
+            (
+              sum(rate(fte_escalations_total{
+                namespace="customer-success-fte"
+              }[30m]))
+              /
+              sum(rate(fte_messages_processed_total{
+                namespace="customer-success-fte"
+              }[30m]))
+            ) > 0.20
+          for: 15m
+          labels:
+            severity: warning
+            team: product
+            component: agent
+          annotations:
+            summary: "FTE escalation rate elevated ({{ $value | humanizePercentage }})"
+            description: >
+              Escalation rate is above 20% — approaching the 25% Final Challenge limit.
+              Current rate: {{ $value | humanizePercentage }}.
+              Review recent escalation reasons in the database.
+
+        # Cross-channel identification rate below threshold
+        - alert: FTECrossChannelIdentificationDegraded
+          expr: |
+            fte_cross_channel_identification_rate{
+              namespace="customer-success-fte"
+            } < 0.95
+          for: 15m
+          labels:
+            severity: warning
+            team: product
+            component: agent
+          annotations:
+            summary: "FTE cross-channel identification rate < 95% ({{ $value | humanizePercentage }})"
+            description: >
+              The rate of correctly identifying customers across channels has dropped below 95%.
+              Current rate: {{ $value | humanizePercentage }}.
+              This fails the Final Challenge requirement (> 95%).
+              Check customer_identifiers table for merge failures.
+
+        # No traffic on a channel — integration may be broken
+        - alert: FTEChannelSilent
+          expr: |
+            sum by (channel) (
+              rate(fte_messages_processed_total{
+                namespace="customer-success-fte"
+              }[30m])
+            ) == 0
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+            component: api
+          annotations:
+            summary: "No messages received on channel {{ $labels.channel }} for 30 minutes"
+            description: >
+              Channel {{ $labels.channel }} has received zero messages for 30 minutes.
+              The webhook or integration may be broken.
+              Check: GET /health for channel configuration status.

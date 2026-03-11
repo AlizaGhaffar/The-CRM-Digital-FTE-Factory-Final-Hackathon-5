@@ -1,0 +1,12 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Kubernetes Namespace
+# Exercise 2.7
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: customer-success-fte
+  labels:
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/part-of: nimbusflow
+    environment: production

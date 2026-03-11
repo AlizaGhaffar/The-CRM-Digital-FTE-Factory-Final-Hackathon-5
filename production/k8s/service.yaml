@@ -1,0 +1,32 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Service
+# Exercise 2.7
+#
+# ClusterIP service routes traffic from the Ingress controller
+# to the API pods. The worker pods have no inbound HTTP and
+# need no Service.
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: fte-api
+  namespace: customer-success-fte
+  labels:
+    app: fte-api
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: nimbusflow
+  annotations:
+    # Expose Prometheus metrics scraping endpoint to the cluster
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: fte-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP

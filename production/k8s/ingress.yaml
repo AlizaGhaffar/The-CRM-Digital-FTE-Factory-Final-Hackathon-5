@@ -1,0 +1,124 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Ingress
+# Exercise 2.7
+#
+# Nginx Ingress with TLS termination (cert-manager + Let's Encrypt).
+#
+# Prerequisites:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+#
+# Update host values with your actual domain before applying.
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fte-ingress
+  namespace: customer-success-fte
+  labels:
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: nimbusflow
+  annotations:
+    # ── Nginx controller ──────────────────────────────────────
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+
+    # ── TLS / cert-manager ────────────────────────────────────
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # ── Request settings ──────────────────────────────────────
+    # Webhook bodies can be large (Gmail Pub/Sub payloads)
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+
+    # ── CORS for web form ─────────────────────────────────────
+    # The FastAPI app handles CORS internally; disable Nginx CORS
+    # to avoid double-header issues.
+    nginx.ingress.kubernetes.io/enable-cors: "false"
+
+    # ── Rate limiting ─────────────────────────────────────────
+    # Protect webhook endpoints from accidental replay storms
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "100"
+
+    # ── Security headers ──────────────────────────────────────
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "DENY" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+spec:
+  # ── TLS termination ─────────────────────────────────────────
+  tls:
+    - hosts:
+        - api.nimbusflow.io          # Update with your domain
+        - support.nimbusflow.io      # Web form domain (for CORS)
+      secretName: fte-tls-cert       # cert-manager populates this Secret
+
+  # ── Routing rules ───────────────────────────────────────────
+  rules:
+    - host: api.nimbusflow.io        # Update with your domain
+      http:
+        paths:
+          # Webhook endpoints
+          - path: /webhooks
+            pathType: Prefix
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          # Web support form submission + ticket status
+          - path: /support
+            pathType: Prefix
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          # REST API: conversations, customers, metrics
+          - path: /conversations
+            pathType: Prefix
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          - path: /customers
+            pathType: Prefix
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          # Health and readiness (allow external monitoring)
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http
+
+          - path: /ready
+            pathType: Exact
+            backend:
+              service:
+                name: fte-api
+                port:
+                  name: http

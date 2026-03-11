@@ -1,0 +1,189 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — API Deployment
+# Exercise 2.7
+#
+# FastAPI application serving webhook endpoints and REST API.
+# Base: 3 replicas | HPA max: 20 replicas
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fte-api
+  namespace: customer-success-fte
+  labels:
+    app: fte-api
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: nimbusflow
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: fte-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0        # Zero-downtime: always keep replicas available
+  template:
+    metadata:
+      labels:
+        app: fte-api
+        app.kubernetes.io/name: customer-success-fte
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
+    spec:
+      # ── Security context ──────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000          # matches the 'fte' user created in Dockerfile
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Graceful shutdown ─────────────────────────────────
+      terminationGracePeriodSeconds: 30
+
+      # ── Init container: wait for Postgres and Kafka ───────
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z $POSTGRES_HOST $POSTGRES_PORT; do
+                echo "Waiting for PostgreSQL..."; sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              HOST=$(echo $KAFKA_BOOTSTRAP_SERVERS | cut -d: -f1)
+              PORT=$(echo $KAFKA_BOOTSTRAP_SERVERS | cut -d: -f2)
+              until nc -z $HOST $PORT; do
+                echo "Waiting for Kafka..."; sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+      containers:
+        - name: api
+          image: nimbusflow/customer-success-fte:latest
+          imagePullPolicy: Always
+          command:
+            - uvicorn
+            - production.api.main:app
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --workers
+            - "2"
+            - --log-level
+            - info
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # ── Environment from ConfigMap ─────────────────────
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+          # ── Secrets as individual env vars ─────────────────
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: POSTGRES_PASSWORD
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: GEMINI_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: OPENAI_API_KEY
+            - name: TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: TWILIO_ACCOUNT_SID
+            - name: TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: TWILIO_AUTH_TOKEN
+            - name: KAFKA_GROUP_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: fte-config
+                  key: KAFKA_GROUP_ID_API
+
+          # ── Gmail credential files ─────────────────────────
+          volumeMounts:
+            - name: gmail-secrets
+              mountPath: /app/secrets
+              readOnly: true
+
+          # ── Health checks ──────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12           # 60s window before marking failed
+
+          # ── Resource budgets ───────────────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      # ── Volumes ────────────────────────────────────────────
+      volumes:
+        - name: gmail-secrets
+          secret:
+            secretName: fte-gmail-secrets
+            items:
+              - key: gmail_credentials.json
+                path: gmail_credentials.json
+              - key: gmail_token.json
+                path: gmail_token.json

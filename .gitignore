@@ -1,0 +1,53 @@
+# Environment
+.env
+*.env.local
+
+# Secrets
+secrets/
+*.json.key
+gmail-credentials.json
+gmail-token.json
+secrets-real.yaml
+*.real.yaml
+*.real.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+venv/
+.venv/
+env/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore
+
+# Test outputs
+test-results/
+coverage.xml

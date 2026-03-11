@@ -1,0 +1,4 @@
+# K8s manifests go here (Day 5)
+# namespace.yaml, configmap.yaml, secrets.yaml,
+# deployment-api.yaml, deployment-worker.yaml,
+# service.yaml, ingress.yaml, hpa.yaml

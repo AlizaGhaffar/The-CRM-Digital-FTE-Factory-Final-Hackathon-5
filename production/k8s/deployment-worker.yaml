@@ -1,0 +1,165 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Worker Deployment
+# Exercise 2.7
+#
+# Kafka consumer running UnifiedMessageProcessor.
+# Processes messages from all three channel topics and runs the
+# Customer Success FTE agent for each inbound message.
+#
+# Base: 3 replicas | HPA max: 30 replicas
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fte-worker
+  namespace: customer-success-fte
+  labels:
+    app: fte-worker
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: nimbusflow
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: fte-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1        # Allow one unavailable during rolling updates
+  template:
+    metadata:
+      labels:
+        app: fte-worker
+        app.kubernetes.io/name: customer-success-fte
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "false"   # Worker has no HTTP endpoint
+    spec:
+      # ── Security context ──────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Graceful shutdown ─────────────────────────────────
+      # Must be long enough for in-flight agent runs to complete
+      terminationGracePeriodSeconds: 60
+
+      # ── Init container: wait for dependencies ─────────────
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z $POSTGRES_HOST $POSTGRES_PORT; do
+                echo "Waiting for PostgreSQL..."; sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              HOST=$(echo $KAFKA_BOOTSTRAP_SERVERS | cut -d: -f1)
+              PORT=$(echo $KAFKA_BOOTSTRAP_SERVERS | cut -d: -f2)
+              until nc -z $HOST $PORT; do
+                echo "Waiting for Kafka..."; sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+      containers:
+        - name: worker
+          image: nimbusflow/customer-success-fte:latest
+          imagePullPolicy: Always
+          command:
+            - python
+            - -m
+            - production.workers.message_processor
+
+          # ── Environment from ConfigMap ─────────────────────
+          envFrom:
+            - configMapRef:
+                name: fte-config
+
+          # ── Secrets as individual env vars ─────────────────
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: POSTGRES_PASSWORD
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: GEMINI_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: OPENAI_API_KEY
+            - name: TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: TWILIO_ACCOUNT_SID
+            - name: TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fte-secrets
+                  key: TWILIO_AUTH_TOKEN
+            - name: KAFKA_GROUP_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: fte-config
+                  key: KAFKA_GROUP_ID_WORKER
+
+          # ── Gmail credential files ─────────────────────────
+          volumeMounts:
+            - name: gmail-secrets
+              mountPath: /app/secrets
+              readOnly: true
+
+          # ── Health: worker has no HTTP port; use process check
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import asyncpg, os; print('ok')"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # ── Resource budgets ───────────────────────────────
+          # Workers run LLM inference + DB queries; need more memory than API
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+      # ── Volumes ────────────────────────────────────────────
+      volumes:
+        - name: gmail-secrets
+          secret:
+            secretName: fte-gmail-secrets
+            items:
+              - key: gmail_credentials.json
+                path: gmail_credentials.json
+              - key: gmail_token.json
+                path: gmail_token.json

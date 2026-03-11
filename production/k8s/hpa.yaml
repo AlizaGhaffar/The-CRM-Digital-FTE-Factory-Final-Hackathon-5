@@ -1,0 +1,114 @@
+# ============================================================
+# NimbusFlow Customer Success FTE — Horizontal Pod Autoscaler
+# Exercise 2.7
+#
+# Two HPAs — one per Deployment.
+# Target: 70% CPU utilization (document spec).
+#
+# Scaling ranges:
+#   API    — 3 to 20 replicas  (document spec)
+#   Worker — 3 to 30 replicas  (document spec)
+#
+# Prerequisites: metrics-server must be installed in the cluster.
+#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# ============================================================
+
+# ── API HPA ───────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fte-api-hpa
+  namespace: customer-success-fte
+  labels:
+    app: fte-api
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: nimbusflow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fte-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    # Primary: CPU utilisation — scale when any pod exceeds 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Secondary: memory — guard against memory-leaking pods
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30    # React quickly to traffic spikes
+      policies:
+        - type: Pods
+          value: 4                       # Add at most 4 pods per scale event
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # 5 min cool-down prevents flapping
+      policies:
+        - type: Pods
+          value: 2                       # Remove at most 2 pods per scale event
+          periodSeconds: 60
+
+---
+
+# ── Worker HPA ────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fte-worker-hpa
+  namespace: customer-success-fte
+  labels:
+    app: fte-worker
+    app.kubernetes.io/name: customer-success-fte
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: nimbusflow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fte-worker
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    # CPU — LLM inference is compute-intensive; scale at 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Memory — agent context accumulates; keep headroom
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 15    # Workers need to scale fast for bursts
+      policies:
+        - type: Pods
+          value: 6                       # Add up to 6 workers per scale event
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600   # 10 min — in-flight agent runs can be long
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
