@@ -182,8 +182,7 @@ async def run_agent(
         )
 
     run_config = RunConfig(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-        tracing_disabled=os.getenv("DISABLE_TRACING", "false").lower() == "true",
+        tracing_disabled=True,  # Gemini endpoint — no OpenAI tracing needed
     )
 
     result = await Runner.run(

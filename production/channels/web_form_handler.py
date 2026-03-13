@@ -371,6 +371,141 @@ async def get_ticket_status(ticket_id: str) -> TicketStatusResponse:
     )
 
 
+@router.get("/ticket/{ticket_id}/messages")
+async def get_ticket_messages(ticket_id: str):
+    """
+    Return all messages (conversation thread) for a given ticket.
+    Called by TicketStatus.jsx to show the full conversation history.
+    """
+    try:
+        pool = await queries.get_pool()
+        async with pool.acquire() as conn:
+            # Find conversation linked to this ticket
+            conv_id = await conn.fetchval(
+                "SELECT conversation_id FROM tickets WHERE id = $1::uuid",
+                ticket_id,
+            )
+            if not conv_id:
+                raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found.")
+
+            rows = await conn.fetch(
+                """
+                SELECT role, content, direction, channel, created_at, delivery_status
+                FROM messages
+                WHERE conversation_id = $1
+                ORDER BY created_at ASC
+                """,
+                conv_id,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("web_form.get_messages_failed", ticket_id=ticket_id, error=str(exc))
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.")
+
+    return {
+        "ticket_id": ticket_id,
+        "messages": [
+            {
+                "role": r["role"],
+                "content": r["content"],
+                "direction": r["direction"],
+                "channel": r["channel"],
+                "created_at": r["created_at"].isoformat(),
+                "delivery_status": r["delivery_status"],
+            }
+            for r in rows
+        ],
+    }
+
+
+class TicketReplyRequest(BaseModel):
+    message: str
+    customer_email: Optional[str] = None
+
+
+@router.post("/ticket/{ticket_id}/reply")
+async def add_ticket_reply(ticket_id: str, body: TicketReplyRequest):
+    """
+    Customer sends a follow-up reply to an existing ticket.
+    Stores the message and publishes to Kafka for agent processing.
+    """
+    try:
+        pool = await queries.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT conversation_id, customer_id FROM tickets WHERE id = $1::uuid",
+                ticket_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found.")
+
+            await conn.execute(
+                """
+                INSERT INTO messages (conversation_id, channel, direction, role, content, channel_message_id)
+                VALUES ($1, 'web_form', 'inbound', 'customer', $2, $3)
+                """,
+                row["conversation_id"],
+                body.message,
+                str(uuid.uuid4()),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("web_form.reply_failed", ticket_id=ticket_id, error=str(exc))
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.")
+
+    message_data = {
+        "channel": "web_form",
+        "channel_message_id": ticket_id,
+        "customer_email": body.customer_email or "",
+        "content": body.message,
+        "ticket_id": ticket_id,
+        "received_at": datetime.utcnow().isoformat(),
+    }
+    await publish_to_kafka(KAFKA_TOPIC, message_data)
+
+    return {"status": "reply_received", "ticket_id": ticket_id}
+
+
+class EscalateRequest(BaseModel):
+    reason: Optional[str] = "Customer requested human support"
+
+
+@router.post("/ticket/{ticket_id}/escalate")
+async def escalate_ticket(ticket_id: str, body: EscalateRequest):
+    """
+    Customer requests human escalation for their ticket.
+    Updates ticket status and marks conversation as escalated.
+    """
+    try:
+        pool = await queries.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT conversation_id FROM tickets WHERE id = $1::uuid",
+                ticket_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found.")
+
+            await conn.execute(
+                "UPDATE tickets SET status = 'escalated' WHERE id = $1::uuid",
+                ticket_id,
+            )
+            await conn.execute(
+                "UPDATE conversations SET status = 'escalated', escalated_to = 'human_agent' WHERE id = $1",
+                row["conversation_id"],
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("web_form.escalate_failed", ticket_id=ticket_id, error=str(exc))
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.")
+
+    log.info("web_form.ticket_escalated", ticket_id=ticket_id, reason=body.reason)
+    return {"status": "escalated", "ticket_id": ticket_id, "reason": body.reason}
+
+
 # ── Backward-compat helpers (used by api/main.py) ────────────────────────────
 
 class WebFormSubmission(BaseModel):

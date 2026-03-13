@@ -51,9 +51,8 @@ def _make_queries(
     m.get_customer_history = AsyncMock(return_value=history or [])
     m.get_customer_summary = AsyncMock(return_value={"plan": "pro", "total_tickets": 2})
     m.update_conversation_sentiment = AsyncMock()
-    m.search_knowledge_base = AsyncMock(return_value=kb_results or [
-        {"title": "How to reset password", "content": "Visit nimbusflow.io/forgot-password", "similarity": 0.82}
-    ])
+    _default_kb = [{"title": "How to reset password", "content": "Visit nimbusflow.io/forgot-password", "similarity": 0.82}]
+    m.search_knowledge_base = AsyncMock(return_value=kb_results if kb_results is not None else _default_kb)
     m.create_escalation = AsyncMock(return_value="esc-001")
     m.update_ticket_status = AsyncMock()
     m.store_message = AsyncMock(return_value="msg-001")

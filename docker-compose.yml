@@ -7,26 +7,6 @@ version: "3.9"
 
 services:
 
-  # ── PostgreSQL with pgvector ──────────────────────────────
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: fte_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: fte_db
-      POSTGRES_USER: fte_user
-      POSTGRES_PASSWORD: changeme
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./production/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fte_user -d fte_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ── Zookeeper (Kafka dependency) ──────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -82,8 +62,6 @@ services:
     container_name: fte_api
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     ports:
@@ -91,7 +69,6 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     volumes:
       - ./secrets:/app/secrets:ro
@@ -110,21 +87,15 @@ services:
     container_name: fte_worker
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     volumes:
       - ./secrets:/app/secrets:ro
-    command: python production/workers/message_processor.py
-
-volumes:
-  postgres_data:
+    command: python -m production.workers.message_processor
 
 networks:
   default:

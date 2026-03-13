@@ -57,6 +57,25 @@ RETRY_BACKOFF_S = float(os.getenv("WORKER_RETRY_BACKOFF", "2.0"))
 SHUTDOWN_TIMEOUT_S = 10
 
 
+def _extract_fields(payload: dict) -> dict:
+    """
+    Normalise a raw Kafka payload into standard worker fields.
+    Handles field name variations across channels:
+      email    : from_email / customer_email, body / content
+      whatsapp : from_phone / customer_phone, body / content
+      web_form : customer_email, content / body
+    Returns a dict with keys: channel, email, phone, name, message, subject.
+    """
+    return {
+        "channel": payload.get("channel", ""),
+        "email":   payload.get("from_email") or payload.get("customer_email"),
+        "phone":   payload.get("from_phone") or payload.get("customer_phone"),
+        "name":    payload.get("customer_name") or payload.get("from_name"),
+        "message": payload.get("body") or payload.get("content") or "",
+        "subject": payload.get("subject", ""),
+    }
+
+
 # ── UnifiedMessageProcessor ───────────────────────────────────────────────────
 
 class UnifiedMessageProcessor:
@@ -165,13 +184,14 @@ class UnifiedMessageProcessor:
         """
         start_time = datetime.now(timezone.utc)
 
-        channel = payload.get("channel", "web_form")
-        channel_message_id = payload.get("message_id")
-        customer_email = payload.get("from_email")
-        customer_phone = payload.get("from_phone")
-        customer_name = payload.get("from_name")
-        body = payload.get("body", "")
-        subject = payload.get("subject")
+        fields = _extract_fields(payload)
+        channel = fields["channel"] or "web_form"
+        channel_message_id = payload.get("message_id") or payload.get("channel_message_id")
+        customer_email = fields["email"]
+        customer_phone = fields["phone"]
+        customer_name = fields["name"]
+        body = fields["message"]
+        subject = fields["subject"]
         thread_id = payload.get("thread_id") or payload.get("session_id")
 
         if not body.strip():

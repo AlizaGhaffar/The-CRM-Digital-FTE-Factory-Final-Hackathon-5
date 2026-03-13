@@ -13,8 +13,8 @@ import os
 import re
 import hashlib
 import logging
+import httpx
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 import asyncpg
 
 load_dotenv()
@@ -22,8 +22,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DOCS_PATH = os.path.join(os.path.dirname(__file__), "../../context/product-docs.md")
-EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-BATCH_SIZE = 20  # Embed N chunks per API call
+EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+BATCH_SIZE = 5  # Gemini embedding API: embed N chunks per call
 
 
 def chunk_markdown(content: str) -> list[dict]:
@@ -86,13 +86,20 @@ def chunk_markdown(content: str) -> list[dict]:
     return chunks
 
 
-async def generate_embeddings(texts: list[str], client: AsyncOpenAI) -> list[list[float]]:
-    """Batch embed texts using OpenAI API."""
-    response = await client.embeddings.create(
-        input=texts,
-        model=EMBEDDING_MODEL,
-    )
-    return [item.embedding for item in response.data]
+async def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Embed texts using Gemini native REST API (embedContent)."""
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    embeddings = []
+    async with httpx.AsyncClient(timeout=60) as client:
+        for text in texts:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent?key={api_key}"
+            resp = await client.post(url, json={
+                "model": f"models/{EMBEDDING_MODEL}",
+                "content": {"parts": [{"text": text}]},
+            })
+            resp.raise_for_status()
+            embeddings.append(resp.json()["embedding"]["values"])
+    return embeddings
 
 
 async def seed():
@@ -116,9 +123,6 @@ async def seed():
         password=os.getenv("POSTGRES_PASSWORD", "changeme"),
     )
 
-    # OpenAI client
-    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
     # Process in batches
     inserted = 0
     for i in range(0, len(chunks), BATCH_SIZE):
@@ -126,7 +130,7 @@ async def seed():
         texts = [f"{c['title']}\n\n{c['content']}" for c in batch]
 
         logger.info(f"Embedding batch {i // BATCH_SIZE + 1} ({len(batch)} chunks)...")
-        embeddings = await generate_embeddings(texts, client)
+        embeddings = await generate_embeddings(texts)
 
         async with pool.acquire() as conn:
             for chunk, embedding in zip(batch, embeddings):
@@ -141,7 +145,7 @@ async def seed():
                     chunk["title"],
                     chunk["content"],
                     chunk["content_hash"],
-                    embedding,
+                    str(embedding),
                     chunk["category"],
                     chunk["source_doc"],
                     chunk["chunk_index"],

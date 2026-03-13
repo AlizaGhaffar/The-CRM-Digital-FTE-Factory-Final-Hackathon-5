@@ -13,6 +13,7 @@ Usage:
 """
 
 import asyncpg
+import json
 import os
 import logging
 from typing import Optional
@@ -28,16 +29,26 @@ async def get_pool() -> asyncpg.Pool:
     """Get or create the shared connection pool."""
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            port=int(os.getenv("POSTGRES_PORT", 5432)),
-            database=os.getenv("POSTGRES_DB", "fte_db"),
-            user=os.getenv("POSTGRES_USER", "fte_user"),
-            password=os.getenv("POSTGRES_PASSWORD", "changeme"),
-            min_size=2,
-            max_size=10,
-            command_timeout=30,
-        )
+        dsn = os.getenv("DATABASE_URL")
+        if dsn:
+            _pool = await asyncpg.create_pool(
+                dsn=dsn,
+                min_size=2,
+                max_size=10,
+                command_timeout=30,
+            )
+        else:
+            _pool = await asyncpg.create_pool(
+                host=os.getenv("POSTGRES_HOST", "localhost"),
+                port=int(os.getenv("POSTGRES_PORT", 5432)),
+                database=os.getenv("POSTGRES_DB", "fte_db"),
+                user=os.getenv("POSTGRES_USER", "fte_user"),
+                password=os.getenv("POSTGRES_PASSWORD", "changeme"),
+                ssl="require",
+                min_size=2,
+                max_size=10,
+                command_timeout=30,
+            )
     return _pool
 
 
@@ -234,7 +245,7 @@ async def store_message(
             """,
             conversation_id, channel, direction, role, content,
             channel_message_id, thread_id, tokens_used, latency_ms,
-            tool_calls or [], sentiment_score, delivery_status,
+            json.dumps(tool_calls or []), sentiment_score, delivery_status,
         )
         return str(msg_id)
 
@@ -455,7 +466,7 @@ async def record_metric(
             VALUES ($1,$2,$3,$4,$5,$6)
             """,
             metric_name, metric_value, channel, ticket_id,
-            conversation_id, dimensions or {},
+            conversation_id, json.dumps(dimensions or {}),
         )
 
 

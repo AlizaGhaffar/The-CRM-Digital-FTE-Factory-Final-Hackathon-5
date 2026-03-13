@@ -24,6 +24,7 @@ import re
 import uuid
 from typing import Optional
 
+import httpx
 import structlog
 from openai import AsyncOpenAI
 from agents import function_tool
@@ -81,6 +82,7 @@ CHANNEL_PARAMS: dict[str, dict] = {
 
 CRITICAL_KEYWORDS: list[str] = [
     "lawyer", "sue", "court", "attorney", "litigation", "legal action", "legal team",
+    "legal counsel", "retained counsel", "retained legal",
     "compromised", "unauthorized access", "hacked", "data breach", "breach", "api key exposure",
     "dispute the charge", "credit card dispute", "chargeback",
     "tasks disappeared", "data gone", "lost my work", "data loss", "tasks vanished",
@@ -160,7 +162,6 @@ class CreateTicketInput(BaseModel):
         return v
 
 
-@function_tool
 async def create_ticket(
     customer_email: Optional[str],
     customer_phone: Optional[str],
@@ -266,6 +267,8 @@ async def create_ticket(
         }
 
 
+_create_ticket_tool = function_tool(create_ticket)
+
 # ── ──────────────────────────────────────────────────────────────────────────
 
 class GetHistoryInput(BaseModel):
@@ -273,7 +276,6 @@ class GetHistoryInput(BaseModel):
     limit: int = Field(5, ge=1, le=20, description="Number of recent tickets to return (default 5)")
 
 
-@function_tool
 async def get_customer_history(customer_id: str, limit: int = 5) -> dict:
     """
     [SKILL 1 — Customer Identification] Retrieve cross-channel support history.
@@ -341,6 +343,8 @@ async def get_customer_history(customer_id: str, limit: int = 5) -> dict:
         }
 
 
+_get_customer_history_tool = function_tool(get_customer_history)
+
 # ════════════════════════════════════════════════════════════════════════════════
 # SKILL 2 — Sentiment Analysis
 # Tool: analyze_sentiment
@@ -351,7 +355,6 @@ class SentimentInput(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Conversation UUID — if provided, score is persisted")
 
 
-@function_tool
 async def analyze_sentiment(message: str, conversation_id: Optional[str] = None) -> dict:
     """
     [SKILL 2 — Sentiment Analysis] Score the emotional tone of a customer message.
@@ -434,9 +437,9 @@ async def analyze_sentiment(message: str, conversation_id: Optional[str] = None)
         # Safe fallback: neutral score — agent proceeds without empathy logic
         score = 0.5
 
-    # Override: critical keywords always cap the score
+    # Override: critical keywords always cap the score below immediate_escalate threshold
     if has_critical:
-        score = min(score, 0.1)
+        score = min(score, 0.09)
 
     # Classify
     if score < 0.1:
@@ -480,6 +483,8 @@ async def analyze_sentiment(message: str, conversation_id: Optional[str] = None)
     }
 
 
+_analyze_sentiment_tool = function_tool(analyze_sentiment)
+
 # ════════════════════════════════════════════════════════════════════════════════
 # SKILL 3 — Knowledge Retrieval
 # Tool: search_knowledge_base
@@ -492,7 +497,6 @@ class KBSearchInput(BaseModel):
     min_similarity: float = Field(0.70, ge=0.0, le=1.0, description="Cosine similarity threshold (0.70 recommended)")
 
 
-@function_tool
 async def search_knowledge_base(
     query: str,
     category: Optional[str] = None,
@@ -541,12 +545,10 @@ async def search_knowledge_base(
         return {"results": [], "found": False, "top_score": 0.0, "search_count": 0}
 
     try:
+        _model = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-3-small")
         client = _get_openai()
-        embedding_response = await client.embeddings.create(
-            input=query[:2000],
-            model=os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004"),
-        )
-        embedding = embedding_response.data[0].embedding
+        resp = await client.embeddings.create(model=_model, input=query[:2000])
+        embedding = resp.data[0].embedding
     except Exception as exc:
         log.error("search_kb embedding_error", error=str(exc), query=query[:80])
         return {
@@ -609,6 +611,8 @@ async def search_knowledge_base(
     }
 
 
+_search_knowledge_base_tool = function_tool(search_knowledge_base)
+
 # ════════════════════════════════════════════════════════════════════════════════
 # SKILL 4 — Escalation Decision
 # Tool: escalate_to_human
@@ -638,7 +642,6 @@ class EscalateInput(BaseModel):
         return v
 
 
-@function_tool
 async def escalate_to_human(
     ticket_id: str,
     customer_id: str,
@@ -785,6 +788,8 @@ async def escalate_to_human(
     }
 
 
+_escalate_to_human_tool = function_tool(escalate_to_human)
+
 # ════════════════════════════════════════════════════════════════════════════════
 # SKILL 5 — Channel Adaptation
 # Tool: send_response
@@ -853,7 +858,6 @@ def _format_for_channel(content: str, channel: str, customer_name: Optional[str]
     return assembled
 
 
-@function_tool
 async def send_response(
     ticket_id: str,
     conversation_id: str,
@@ -967,13 +971,29 @@ async def send_response(
     }
 
 
+_send_response_tool = function_tool(send_response)
+
+# Expose __name__ so tests can introspect tool names via t.__name__
+for _fn, _tool in [
+    (create_ticket,          _create_ticket_tool),
+    (get_customer_history,   _get_customer_history_tool),
+    (analyze_sentiment,      _analyze_sentiment_tool),
+    (search_knowledge_base,  _search_knowledge_base_tool),
+    (escalate_to_human,      _escalate_to_human_tool),
+    (send_response,          _send_response_tool),
+]:
+    try:
+        _tool.__name__ = _fn.__name__
+    except (AttributeError, TypeError):
+        pass  # FunctionTool may not allow __name__ assignment on all SDK versions
+
 # ── Tool registry ─────────────────────────────────────────────────────────────
 
 ALL_TOOLS = [
-    create_ticket,           # Skill 1a — Customer Identification
-    get_customer_history,    # Skill 1b — Customer Identification
-    analyze_sentiment,       # Skill 2  — Sentiment Analysis
-    search_knowledge_base,   # Skill 3  — Knowledge Retrieval
-    escalate_to_human,       # Skill 4  — Escalation Decision
-    send_response,           # Skill 5  — Channel Adaptation
+    _create_ticket_tool,           # Skill 1a — Customer Identification
+    _get_customer_history_tool,    # Skill 1b — Customer Identification
+    _analyze_sentiment_tool,       # Skill 2  — Sentiment Analysis
+    _search_knowledge_base_tool,   # Skill 3  — Knowledge Retrieval
+    _escalate_to_human_tool,       # Skill 4  — Escalation Decision
+    _send_response_tool,           # Skill 5  — Channel Adaptation
 ]
