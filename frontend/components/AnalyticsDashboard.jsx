@@ -121,7 +121,7 @@ const TOOL_USAGE = [
 ];
 
 const NEGATIVE_FLAGS = [
-  { id: 'TKT-00391', customer: 'eve@design.co',   score: 0.11, snippet: 'I'm just exhausted with all these bugs…',         time: '14m ago' },
+  { id: 'TKT-00391', customer: 'eve@design.co',   score: 0.11, snippet: "I'm just exhausted with all these bugs…",         time: '14m ago' },
   { id: 'TKT-00344', customer: 'hiro@saas.jp',    score: 0.18, snippet: 'This is completely unacceptable for enterprise.',  time: '41m ago' },
   { id: 'TKT-00312', customer: 'carol@tech.dev',  score: 0.22, snippet: 'Why is nobody reading my messages?',               time: '1h ago' },
   { id: 'TKT-00289', customer: 'frank@media.io',  score: 0.24, snippet: 'Considering cancellation at this point.',          time: '2h ago' },

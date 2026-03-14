@@ -85,10 +85,10 @@ class SupportFormSubmission(BaseModel):
     - message: script tags stripped (XSS guard at system boundary)
     """
 
-    name: str
+    name: Optional[str] = None
     email: EmailStr
     subject: str
-    category: str                              # 'general', 'technical', 'billing', 'feedback', 'bug_report'
+    category: str = "general"                  # 'general', 'technical', 'billing', 'feedback', 'bug_report'
     message: str
     priority: Optional[str] = "medium"
     attachments: Optional[list[str]] = []
@@ -96,8 +96,10 @@ class SupportFormSubmission(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def name_must_not_be_empty(cls, v: str) -> str:
-        if not v or len(v.strip()) < 2:
+    def name_must_not_be_empty(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if len(v.strip()) < 2:
             raise ValueError("Name must be at least 2 characters")
         return v.strip()
 
@@ -134,6 +136,7 @@ class SupportFormResponse(BaseModel):
     """Response returned to the browser after successful form submission."""
 
     ticket_id: str
+    status: str = "received"
     message: str
     estimated_response_time: str
 
@@ -256,7 +259,7 @@ async def create_ticket_record(ticket_id: str, message_data: dict) -> bool:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/submit", response_model=SupportFormResponse)
+@router.post("/submit", response_model=SupportFormResponse, status_code=202)
 async def submit_support_form(submission: SupportFormSubmission) -> SupportFormResponse:
     """
     Accept a web support form submission, create a ticket, and publish to Kafka.
@@ -559,6 +562,7 @@ def parse_web_form(form_data: dict) -> dict:
         "content": submission.message,
         "session_id": submission.session_id,
         "priority": priority,
+        "suggested_priority": priority,
     }
 
 

@@ -16,7 +16,7 @@ Every tool guarantees:
   - structlog structured logging (JSON in production, colored in dev)
   - LLM-optimised docstrings (when to call, what it returns, how to use results)
 
-Model: Gemini via OpenAI-compatible endpoint (GEMINI_API_KEY + base_url).
+Model: Grok (xAI) via OpenAI-compatible endpoint (GROK_API_KEY + base_url).
 """
 
 import os
@@ -34,18 +34,18 @@ from production.database import queries
 
 log = structlog.get_logger(__name__)
 
-# ── Gemini client (OpenAI Agents SDK external provider) ───────────────────────
+# ── Groq (GroqCloud) client (OpenAI Agents SDK external provider) ─────────────
 
 _openai: Optional[AsyncOpenAI] = None
 
 
 def _get_openai() -> AsyncOpenAI:
-    """Lazy singleton — Gemini via OpenAI-compatible endpoint."""
+    """Lazy singleton — Groq (GroqCloud) via OpenAI-compatible endpoint."""
     global _openai
     if _openai is None:
         _openai = AsyncOpenAI(
-            api_key=os.getenv("GEMINI_API_KEY", ""),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=os.getenv("GROQ_API_KEY", os.getenv("GROK_API_KEY", os.getenv("GEMINI_API_KEY", ""))),
+            base_url="https://api.groq.com/openai/v1",
         )
     return _openai
 
@@ -109,6 +109,20 @@ ESCALATION_ROUTING: dict[str, str] = {
     "low":      "support@nimbusflow.io",
 }
 
+# Reason-based routing overrides urgency-based routing (spec §6.1/6.2)
+ESCALATION_REASON_ROUTING: dict[str, str] = {
+    "legal_threat":       "legal@nimbusflow.io",
+    "security_incident":  "security@nimbusflow.io",
+    "chargeback_threat":  "billing@nimbusflow.io",
+    "data_loss":          "technical@nimbusflow.io",
+    "billing_dispute":    "billing@nimbusflow.io",
+    "compliance_request": "legal@nimbusflow.io",
+    "enterprise_inquiry": "csm@nimbusflow.io",
+    "pricing_negotiation": "sales@nimbusflow.io",
+    "account_sensitive":  "account@nimbusflow.io",
+    "knowledge_gap":      "technical@nimbusflow.io",
+}
+
 ESCALATION_QUEUE: dict[str, str] = {
     "critical": "critical-queue",
     "high":     "priority-queue",
@@ -138,12 +152,36 @@ class CreateTicketInput(BaseModel):
     category: Optional[str] = Field(
         None,
         description=(
-            "Issue category: general | technical | billing | bug_report | feedback. "
-            "Sub-classify 'general' further: is_plan_question, is_compliance_question, "
-            "is_account_management, is_enterprise_inquiry."
+            "Issue category — must be one of: general | technical | billing | "
+            "bug_report | feedback | security | enterprise. "
+            "Use 'general' for order issues, shipping, account management, or anything that doesn't fit."
         ),
     )
     priority: str = Field("medium", description="Ticket priority: low | medium | high | critical")
+
+    @field_validator("category")
+    @classmethod
+    def valid_category(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return "general"
+        allowed = {"general", "technical", "billing", "bug_report", "feedback", "security", "enterprise"}
+        if v in allowed:
+            return v
+        # Map unknown values to closest match
+        v_lower = v.lower()
+        if any(k in v_lower for k in ("bill", "payment", "charge", "invoice", "refund")):
+            return "billing"
+        if any(k in v_lower for k in ("bug", "crash", "error", "broken")):
+            return "bug_report"
+        if any(k in v_lower for k in ("tech", "api", "integration", "setup")):
+            return "technical"
+        if any(k in v_lower for k in ("security", "hack", "breach", "auth")):
+            return "security"
+        if any(k in v_lower for k in ("enterprise", "team", "org")):
+            return "enterprise"
+        if any(k in v_lower for k in ("feedback", "suggestion", "feature")):
+            return "feedback"
+        return "general"
 
     @field_validator("channel")
     @classmethod
@@ -163,11 +201,11 @@ class CreateTicketInput(BaseModel):
 
 
 async def create_ticket(
-    customer_email: Optional[str],
-    customer_phone: Optional[str],
-    customer_name:  Optional[str],
-    channel:  str,
-    subject:  str,
+    customer_email: Optional[str] = None,
+    customer_phone: Optional[str] = None,
+    customer_name:  Optional[str] = None,
+    channel:  str = "web_form",
+    subject:  str = "Support request",
     category: Optional[str] = None,
     priority: str = "medium",
 ) -> dict:
@@ -198,9 +236,9 @@ async def create_ticket(
 
     Fallback on DB failure: returns temporary IDs so the agent can still respond.
     """
-    # Validate inputs
+    # Validate inputs — use cleaned model output (normalises category)
     try:
-        CreateTicketInput(
+        _validated = CreateTicketInput(
             customer_email=customer_email,
             customer_phone=customer_phone,
             customer_name=customer_name,
@@ -209,6 +247,9 @@ async def create_ticket(
             category=category,
             priority=priority,
         )
+        category = _validated.category  # use normalised value
+        priority = _validated.priority
+        channel  = _validated.channel
     except Exception as exc:
         log.warning("create_ticket validation failed", error=str(exc), channel=channel)
         return {
@@ -400,44 +441,41 @@ async def analyze_sentiment(message: str, conversation_id: Optional[str] = None)
             "trend": "stable",
         }
 
-    # Fast path: critical keyword scan (no LLM call needed)
     msg_lower = message.lower()
     has_critical = any(kw in msg_lower for kw in CRITICAL_KEYWORDS)
 
-    # LLM sentiment scoring
+    # Primary: call Grok LLM for sentiment score
+    score = 0.5  # default neutral fallback
     try:
         client = _get_openai()
-        response = await client.chat.completions.create(
-            model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
+        resp = await client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL", os.getenv("GROK_MODEL", os.getenv("GEMINI_MODEL", "llama-3.3-70b-versatile"))),
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are a sentiment analysis engine for a customer support system. "
-                        "Score the customer message on a scale of 0.0 to 1.0:\n"
-                        "  0.0 = extremely negative, hostile, threatening, or distressed\n"
-                        "  0.5 = neutral, asking a simple question\n"
-                        "  1.0 = happy, satisfied, positive\n"
-                        "Respond with ONLY a single decimal number. No explanation."
+                        "You are a sentiment scorer. Score the emotional tone of the customer "
+                        "message on a scale of 0.0 (maximally hostile/negative) to 1.0 "
+                        "(maximally positive/satisfied). Reply with ONLY a float number, nothing else."
                     ),
                 },
-                {"role": "user", "content": message[:1000]},
+                {"role": "user", "content": message},
             ],
-            temperature=0,
             max_tokens=10,
+            temperature=0,
         )
-        raw = response.choices[0].message.content.strip()
-        score = max(0.0, min(1.0, float(raw)))
-
-    except ValueError:
-        log.warning("sentiment_parse_failed", raw_response=raw if "raw" in dir() else "unknown")
-        score = 0.5
+        raw = resp.choices[0].message.content.strip()
+        score = float(raw)
+        score = max(0.0, min(1.0, score))
     except Exception as exc:
-        log.error("analyze_sentiment llm_error", error=str(exc))
-        # Safe fallback: neutral score — agent proceeds without empathy logic
-        score = 0.5
+        log.warning("analyze_sentiment llm_failed, using neutral fallback", error=str(exc))
+        return {
+            "score": 0.5, "level": "neutral",
+            "requires_empathy": False, "immediate_escalate": False,
+            "trend": "stable",
+        }
 
-    # Override: critical keywords always cap the score below immediate_escalate threshold
+    # Override: critical keywords always cap score below immediate_escalate threshold
     if has_critical:
         score = min(score, 0.09)
 
@@ -544,16 +582,22 @@ async def search_knowledge_base(
         log.warning("search_kb validation failed", error=str(exc))
         return {"results": [], "found": False, "top_score": 0.0, "search_count": 0}
 
-    try:
-        _model = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-3-small")
-        client = _get_openai()
-        resp = await client.embeddings.create(model=_model, input=query[:2000])
-        embedding = resp.data[0].embedding
-    except Exception as exc:
-        log.error("search_kb embedding_error", error=str(exc), query=query[:80])
+    _embed_model = os.getenv("GROQ_EMBEDDING_MODEL", os.getenv("GEMINI_EMBEDDING_MODEL", ""))
+    embedding = None
+    if _embed_model:
+        try:
+            client = _get_openai()
+            resp = await client.embeddings.create(model=_embed_model, input=query[:2000])
+            embedding = resp.data[0].embedding
+        except Exception as exc:
+            log.warning("search_kb embedding_unavailable", error=str(exc), query=query[:80])
+
+    if embedding is None:
+        # Groq doesn't support embeddings — skip vector search, return graceful empty
+        log.info("search_kb skipped", reason="no_embedding_model", query=query[:80])
         return {
             "results": [], "found": False, "top_score": 0.0,
-            "search_count": 1, "error": "embedding_failed",
+            "search_count": 0, "note": "knowledge_base_search_unavailable",
         }
 
     # Attempt 1: primary threshold
@@ -712,7 +756,7 @@ async def escalate_to_human(
     elif any(kw in combined for kw in HIGH_KEYWORDS) and urgency != "critical":
         urgency = "high"
 
-    routed_to = ESCALATION_ROUTING[urgency]
+    routed_to = ESCALATION_REASON_ROUTING.get(reason) or ESCALATION_ROUTING[urgency]
     queue     = ESCALATION_QUEUE[urgency]
     sla       = SLA_LABEL[urgency]
 
@@ -955,12 +999,56 @@ async def send_response(
         )
         message_id = f"msg-fallback-{uuid.uuid4().hex[:8]}"
 
+    # ── Actual channel delivery ───────────────────────────────────────────────
+    delivery_status = "stored"
+    try:
+        ticket_info = await queries.get_ticket(ticket_id) if not ticket_id.startswith("temp-") else None
+
+        if channel == "email" and ticket_info and ticket_info.get("customer_email"):
+            from production.channels.gmail_handler import GmailHandler
+            gmail = GmailHandler()
+            result = await gmail.send_reply(
+                to_email=ticket_info["customer_email"],
+                subject=subject or f"Re: {ticket_info.get('subject', 'Your support request')}",
+                body=formatted,
+                thread_id=ticket_info.get("metadata", {}).get("thread_id") if ticket_info.get("metadata") else None,
+            )
+            delivery_status = result.get("delivery_status", "sent")
+            log.info("email_reply_sent", to=ticket_info["customer_email"], status=delivery_status)
+
+        elif channel == "whatsapp" and ticket_info and ticket_info.get("customer_phone"):
+            from production.channels.whatsapp_handler import WhatsAppHandler
+            wa = WhatsAppHandler()
+            result = await wa.send_message(
+                to_phone=ticket_info["customer_phone"],
+                body=formatted,
+            )
+            delivery_status = result.get("delivery_status", "queued")
+            log.info("whatsapp_reply_sent", to=ticket_info["customer_phone"], status=delivery_status)
+
+        elif channel == "web_form" and ticket_info and ticket_info.get("customer_email"):
+            # Web form: send email notification to customer
+            from production.channels.gmail_handler import GmailHandler
+            gmail = GmailHandler()
+            result = await gmail.send_reply(
+                to_email=ticket_info["customer_email"],
+                subject=f"Your support request has been received — Ticket {ticket_id[:8].upper()}",
+                body=formatted,
+            )
+            delivery_status = result.get("delivery_status", "sent")
+            log.info("webform_email_sent", to=ticket_info["customer_email"], status=delivery_status)
+
+    except Exception as exc:
+        log.error("channel_delivery_failed", channel=channel, ticket_id=ticket_id, error=str(exc))
+        delivery_status = "delivery_failed"
+
     log.info(
         "response_sent",
         message_id=message_id,
         ticket_id=ticket_id,
         channel=channel,
         char_count=len(formatted),
+        delivery_status=delivery_status,
     )
 
     return {
@@ -968,6 +1056,7 @@ async def send_response(
         "formatted_content": formatted,
         "char_count":        len(formatted),
         "channel":           channel,
+        "delivery_status":   delivery_status,
     }
 
 

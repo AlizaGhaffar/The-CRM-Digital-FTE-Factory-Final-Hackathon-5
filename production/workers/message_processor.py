@@ -212,16 +212,29 @@ class UnifiedMessageProcessor:
             channel=channel,
         )
 
-        # Step 4 — Store inbound message
-        await self.store_message(
-            conversation_id=conversation_id,
-            channel=channel,
-            direction="inbound",
-            role="customer",
-            content=body,
-            channel_message_id=channel_message_id,
-            thread_id=thread_id,
-        )
+        # Step 4 — Store inbound message (idempotent: skip if already stored)
+        already_stored = False
+        if channel_message_id:
+            try:
+                pool = await queries.get_pool()
+                async with pool.acquire() as conn:
+                    exists = await conn.fetchval(
+                        "SELECT 1 FROM messages WHERE channel_message_id = $1 LIMIT 1",
+                        str(channel_message_id),
+                    )
+                    already_stored = bool(exists)
+            except Exception:
+                pass  # If check fails, store anyway
+        if not already_stored:
+            await self.store_message(
+                conversation_id=conversation_id,
+                channel=channel,
+                direction="inbound",
+                role="customer",
+                content=body,
+                channel_message_id=channel_message_id,
+                thread_id=thread_id,
+            )
 
         # Step 5 — Load prior conversation turns
         history = await self.load_conversation_history(conversation_id)

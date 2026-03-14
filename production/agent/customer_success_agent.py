@@ -89,14 +89,14 @@ the customer's issue or get them to the right person who can.
 """
 
 
-# ── Gemini external client (OpenAI-compatible endpoint) ──────────────────────
+# ── Groq (GroqCloud) external client (OpenAI-compatible endpoint) ─────────────
 # Uses OpenAI Agents SDK external provider support.
-# Docs: https://generativelanguage.googleapis.com/v1beta/openai/
+# Docs: https://console.groq.com/docs
 
-def _get_gemini_client() -> AsyncOpenAI:
+def _get_grok_client() -> AsyncOpenAI:
     return AsyncOpenAI(
-        api_key=os.getenv("GEMINI_API_KEY", ""),
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        api_key=os.getenv("GROQ_API_KEY", os.getenv("GROK_API_KEY", os.getenv("GEMINI_API_KEY", ""))),
+        base_url="https://api.groq.com/openai/v1",
     )
 
 
@@ -106,7 +106,7 @@ _agent: Optional[Agent] = None
 
 
 def get_agent() -> Agent:
-    """Get or create the Customer Success FTE agent backed by Gemini."""
+    """Get or create the Customer Success FTE agent backed by Grok (xAI)."""
     global _agent
     if _agent is None:
         _agent = Agent(
@@ -114,8 +114,8 @@ def get_agent() -> Agent:
             instructions=SYSTEM_PROMPT,
             tools=ALL_TOOLS,
             model=OpenAIChatCompletionsModel(
-                model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
-                openai_client=_get_gemini_client(),
+                model=os.getenv("GROQ_MODEL", os.getenv("GROK_MODEL", os.getenv("GEMINI_MODEL", "llama-3.3-70b-versatile"))),
+                openai_client=_get_grok_client(),
             ),
         )
     return _agent
@@ -182,7 +182,7 @@ async def run_agent(
         )
 
     run_config = RunConfig(
-        tracing_disabled=True,  # Gemini endpoint — no OpenAI tracing needed
+        tracing_disabled=True,  # Grok (xAI) endpoint — no OpenAI tracing needed
     )
 
     result = await Runner.run(

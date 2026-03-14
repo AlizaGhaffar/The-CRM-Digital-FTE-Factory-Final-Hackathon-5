@@ -483,6 +483,8 @@ def parse_twilio_webhook(form_data: dict) -> Optional[dict]:
         "channel": "whatsapp",
         "channel_message_id": form_data.get("MessageSid", ""),
         "customer_phone": customer_phone,
+        "from_phone": customer_phone,      # alias used by tests and message_processor
+        "from_email": None,                # WhatsApp has no email — agent must ask
         "customer_name": form_data.get("ProfileName"),
         "content": body,
         "received_at": datetime.utcnow().isoformat(),

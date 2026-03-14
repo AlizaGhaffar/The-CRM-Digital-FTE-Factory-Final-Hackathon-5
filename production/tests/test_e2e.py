@@ -23,6 +23,21 @@ from httpx import AsyncClient
 
 def _mock_queries():
     """Return a mock queries module with all DB calls stubbed."""
+    from unittest.mock import AsyncMock as _AM, MagicMock as _MM
+
+    # Build a pool whose acquire() works as an async context manager
+    mock_conn = _MM()
+    mock_conn.fetchrow = _AM(return_value=None)
+    mock_conn.fetch = _AM(return_value=[])
+    mock_conn.fetchval = _AM(return_value=1)
+    mock_conn.execute = _AM()
+
+    mock_pool = _MM()
+    mock_pool.acquire = _MM(return_value=_MM(
+        __aenter__=_AM(return_value=mock_conn),
+        __aexit__=_AM(return_value=False),
+    ))
+
     m = MagicMock()
     m.find_or_create_customer = AsyncMock(return_value="cust-uuid-test")
     m.get_or_create_conversation = AsyncMock(return_value="conv-uuid-test")
@@ -30,6 +45,7 @@ def _mock_queries():
     m.get_customer_history = AsyncMock(return_value=[])
     m.get_customer_summary = AsyncMock(return_value={})
     m.update_conversation_sentiment = AsyncMock()
+    m.update_message_delivery = AsyncMock()
     m.search_knowledge_base = AsyncMock(return_value=[
         {"title": "Password Reset", "content": "Go to nimbusflow.io/forgot-password...", "similarity": 0.85}
     ])
@@ -39,8 +55,9 @@ def _mock_queries():
     m.record_metric = AsyncMock()
     m.get_ticket = AsyncMock(return_value=None)
     m.get_open_tickets = AsyncMock(return_value=[])
+    m.get_channel_summary = AsyncMock(return_value=[])
     m.close_pool = AsyncMock()
-    m.get_pool = AsyncMock()
+    m.get_pool = AsyncMock(return_value=mock_pool)
     return m
 
 
@@ -62,7 +79,9 @@ class TestAPIEndpoints:
 
     @pytest.fixture
     def client(self):
-        with patch("production.api.main.queries", _mock_queries()):
+        mock_q = _mock_queries()
+        with patch("production.api.main.queries", mock_q), \
+             patch("production.channels.web_form_handler.queries", mock_q):
             with patch("production.api.main.AIOKafkaProducer") as mock_producer_class:
                 mock_producer = AsyncMock()
                 mock_producer.start = AsyncMock()
@@ -80,7 +99,7 @@ class TestAPIEndpoints:
         assert resp.json()["status"] == "ok"
 
     def test_web_form_valid_submission(self, client):
-        resp = client.post("/api/support", json={
+        resp = client.post("/support/submit", json={
             "email": "alice@corp.com",
             "name": "Alice",
             "subject": "GitHub integration not working",
@@ -90,7 +109,7 @@ class TestAPIEndpoints:
         assert resp.json()["status"] == "received"
 
     def test_web_form_invalid_email(self, client):
-        resp = client.post("/api/support", json={
+        resp = client.post("/support/submit", json={
             "email": "not-an-email",
             "subject": "Help",
             "message": "Something went wrong with our setup please help us fix it now.",
@@ -98,7 +117,7 @@ class TestAPIEndpoints:
         assert resp.status_code == 422
 
     def test_web_form_honeypot_rejected(self, client):
-        resp = client.post("/api/support", json={
+        resp = client.post("/support/submit", json={
             "email": "bot@spam.com",
             "subject": "Buy cheap pills",
             "message": "Click here for discount meds available for purchase now online today yes.",
@@ -107,7 +126,7 @@ class TestAPIEndpoints:
         assert resp.status_code == 422
 
     def test_ticket_not_found(self, client):
-        resp = client.get("/api/tickets/nonexistent-id")
+        resp = client.get("/support/ticket/nonexistent-id")
         assert resp.status_code == 404
 
 

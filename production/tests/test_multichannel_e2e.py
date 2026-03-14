@@ -240,7 +240,7 @@ class TestWebFormChannel:
     """Test the web support form — POST /support/submit and GET /support/ticket/{id}."""
 
     def test_form_submission_valid(self, client):
-        """Valid form submission → 200 with ticket_id and confirmation message."""
+        """Valid form submission → 202 with ticket_id and confirmation message."""
         resp = client.post("/support/submit", json={
             "name": CUSTOMER_NAME,
             "email": CUSTOMER_EMAIL,
@@ -252,7 +252,7 @@ class TestWebFormChannel:
             ),
             "priority": "medium",
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert "ticket_id" in data
         assert "estimated_response_time" in data
@@ -270,7 +270,7 @@ class TestWebFormChannel:
                 "all deployments across our production environment."
             ),
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         assert "ticket_id" in resp.json()
 
     def test_form_validation_invalid_email(self, client):
@@ -332,7 +332,7 @@ class TestWebFormChannel:
             ),
         })
         # XSS guard strips the script tag — submission should succeed
-        assert resp.status_code == 200
+        assert resp.status_code == 202
 
     def test_ticket_status_retrieval_found(self, client, mock_q):
         """GET /support/ticket/{id} with existing ticket → 200 with status."""

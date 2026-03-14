@@ -54,7 +54,7 @@ const MOCK_CONFIG = {
       { id: 'f4', label: 'Message', type: 'textarea', required: true },
       { id: 'f5', label: 'Phone',   type: 'tel',      required: false },
     ],
-    success_message:  'Thanks for reaching out! We'll get back to you within 24 hours.',
+    success_message:  "Thanks for reaching out! We'll get back to you within 24 hours.",
     redirect_url:     '',
     email_notify:     true,
     embed_code:       `<script src="https://cdn.nimbusflow.io/widget.js" data-key="wf_abc123"></script>`,

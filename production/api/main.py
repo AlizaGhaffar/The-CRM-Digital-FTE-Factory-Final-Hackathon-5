@@ -185,6 +185,63 @@ async def gmail_webhook(
     return {"status": "accepted", "history_id": history_id}
 
 
+# ── 1b. GET /webhooks/gmail/poll ─────────────────────────────────────────────
+
+@app.get("/webhooks/gmail/poll", tags=["channels"])
+async def gmail_poll(
+    background_tasks: BackgroundTasks,
+    producer: AIOKafkaProducer = Depends(get_producer),
+    max_results: int = 5,
+):
+    """
+    Manually poll Gmail INBOX for unread messages and push them to Kafka.
+    Use this for demo/testing when Google Cloud Pub/Sub is not configured.
+
+    Flow:
+      1. Fetch up to max_results unread messages from INBOX.
+      2. Publish each to nimbusflow.messages.email for the worker.
+      3. Returns list of fetched message subjects.
+    """
+    from production.channels.gmail_handler import GmailHandler
+    import asyncio
+
+    handler = GmailHandler()
+    service = handler._build_service()
+
+    def _list_unread():
+        return (
+            service.users()
+            .messages()
+            .list(userId=handler.user_id, q="is:unread label:INBOX", maxResults=max_results)
+            .execute()
+        )
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _list_unread)
+    except Exception as exc:
+        logger.error("gmail_poll: list failed: %s", exc)
+        raise HTTPException(status_code=503, detail=f"Gmail API error: {exc}")
+
+    msg_ids = [m["id"] for m in result.get("messages", [])]
+    if not msg_ids:
+        return {"status": "no_new_messages", "fetched": 0}
+
+    fetched = []
+
+    async def _fetch_and_publish():
+        for msg_id in msg_ids:
+            msg = await handler.get_message(msg_id)
+            if msg:
+                fetched.append(msg.get("subject", "(no subject)"))
+                try:
+                    await _publish(TOPIC_EMAIL, msg, producer)
+                except Exception as exc:
+                    logger.error("gmail_poll: publish failed: %s", exc)
+
+    await _fetch_and_publish()
+    return {"status": "published", "fetched": len(fetched), "subjects": fetched}
+
+
 # ── 2. POST /webhooks/whatsapp ────────────────────────────────────────────────
 
 @app.post("/webhooks/whatsapp", tags=["channels"])

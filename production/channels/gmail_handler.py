@@ -556,7 +556,33 @@ class GmailHandler:
 
 
 # ── Module-level convenience functions (backward compat) ─────────────────────
-# Used by api/main.py webhook and message_processor.py
+# Used by api/main.py webhook, message_processor.py, and tests.
+
+def _extract_body(payload: dict) -> str:
+    """
+    Module-level wrapper for GmailHandler._extract_body.
+    Recursively extracts plain-text body from a Gmail message payload.
+    Prefers text/plain over text/html. Returns empty string if none found.
+    """
+    import base64 as _b64
+    mime_type = payload.get("mimeType", "")
+    body_data = payload.get("body", {}).get("data", "")
+
+    if mime_type == "text/plain" and body_data:
+        return _b64.urlsafe_b64decode(body_data + "==").decode(
+            "utf-8", errors="replace"
+        ).strip()
+
+    html_fallback = ""
+    for part in payload.get("parts", []):
+        result = _extract_body(part)
+        if result:
+            if part.get("mimeType", "") == "text/plain":
+                return result
+            html_fallback = html_fallback or result
+
+    return html_fallback
+
 
 def parse_pubsub_push(pubsub_body: dict) -> Optional[dict]:
     """
