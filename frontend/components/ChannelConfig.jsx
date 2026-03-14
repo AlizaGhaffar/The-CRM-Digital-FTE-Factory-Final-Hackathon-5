@@ -40,7 +40,7 @@ const MOCK_CONFIG = {
   whatsapp: {
     connected:     true,
     account_sid:   'AC_your_account_sid_here',
-    auth_token:    'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+    auth_token:    'your_auth_token_here',
     phone_number:  '+1 (555) 012-3456',
     sandbox_mode:  false,
     webhook_url:   'https://api.nimbusflow.io/webhooks/whatsapp/def456uvw',
