@@ -23,16 +23,16 @@ tests:
 
 ## Prompt
 
-main .env set karrahi is project ki to postgresql ka ye mila mujhe jab connect kiya neondatabase per postgresql://neondb_owner:npg_W6nFN1hJicVr@ep-billowing-hall-am8grpe8-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require  to issy khan dalu .env dekho bato
+main .env set karrahi is project ki to postgresql ka NeonDB connection string mila — .env mein update karna tha
 
 ## Response snapshot
 
 Read .env file, identified the PostgreSQL section with placeholder localhost values. Updated the following variables to point to NeonDB:
-- POSTGRES_HOST → ep-billowing-hall-am8grpe8-pooler.c-5.us-east-1.aws.neon.tech
+- POSTGRES_HOST → [REDACTED - NeonDB pooler endpoint]
 - POSTGRES_DB → neondb
 - POSTGRES_USER → neondb_owner
-- POSTGRES_PASSWORD → npg_W6nFN1hJicVr
-- DATABASE_URL → full NeonDB URL with sslmode=require&channel_binding=require
+- POSTGRES_PASSWORD → [REDACTED - rotate immediately if exposed]
+- DATABASE_URL → [REDACTED - see .env file]
 
 ## Outcome
 
