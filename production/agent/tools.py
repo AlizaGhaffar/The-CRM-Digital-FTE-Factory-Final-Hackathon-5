@@ -593,11 +593,22 @@ async def search_knowledge_base(
             log.warning("search_kb embedding_unavailable", error=str(exc), query=query[:80])
 
     if embedding is None:
-        # Groq doesn't support embeddings — skip vector search, return graceful empty
-        log.info("search_kb skipped", reason="no_embedding_model", query=query[:80])
+        # Groq doesn't support embeddings — fall back to text/keyword search
+        log.info("search_kb text_fallback", reason="no_embedding_model", query=query[:80])
+        try:
+            results = await queries.search_knowledge_base_text(
+                query=query, max_results=max_results, category=category,
+            )
+        except Exception as exc:
+            log.error("search_kb text_fallback_error", error=str(exc))
+            results = []
+        found = len(results) > 0
         return {
-            "results": [], "found": False, "top_score": 0.0,
-            "search_count": 0, "note": "knowledge_base_search_unavailable",
+            "results": results,
+            "found": found,
+            "top_score": 0.5 if found else 0.0,
+            "search_count": 1,
+            "note": "text_keyword_fallback",
         }
 
     # Attempt 1: primary threshold

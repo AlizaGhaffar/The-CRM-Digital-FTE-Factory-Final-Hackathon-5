@@ -124,10 +124,10 @@ function CheckIcon({ className }) {
 // ── Sidebar ─────────────────────────────────────────────────────────────────
 
 function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
-  const bg      = dark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100';
+  const bg      = dark ? 'bg-gray-950 border-purple-900/40' : 'bg-white border-purple-100';
   const text    = dark ? 'text-gray-100' : 'text-gray-900';
-  const muted   = dark ? 'text-gray-400' : 'text-gray-500';
-  const logo    = dark ? 'text-blue-400' : 'text-blue-600';
+  const muted   = dark ? 'text-purple-400' : 'text-gray-500';
+  const logo    = dark ? 'text-violet-400' : 'text-violet-600';
 
   return (
     <aside className={`flex flex-col h-full border-r transition-all duration-300 ${bg} ${
@@ -137,7 +137,7 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
       <div className={`flex items-center h-14 px-4 border-b ${dark ? 'border-gray-800' : 'border-gray-100'} flex-shrink-0`}>
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl font-bold text-sm ${
-            dark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'
+            dark ? 'bg-violet-700 text-white' : 'bg-violet-600 text-white'
           }`}>N</div>
           {!collapsed && (
             <span className={`text-sm font-bold truncate ${logo}`}>NimbusFlow</span>
@@ -166,16 +166,16 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
               className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 group relative ${
                 active
                   ? (dark
-                      ? 'bg-blue-900/50 text-blue-400 shadow-sm'
-                      : 'bg-blue-50 text-blue-700 shadow-sm')
+                      ? 'bg-violet-900/50 text-violet-400 shadow-sm'
+                      : 'bg-violet-50 text-violet-700 shadow-sm')
                   : (dark
-                      ? 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900')
+                      ? 'text-purple-400 hover:bg-purple-900/30 hover:text-purple-200'
+                      : 'text-gray-600 hover:bg-purple-50 hover:text-gray-900')
               }`}
             >
               {/* Active indicator bar */}
               {active && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-blue-500" />
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-violet-500" />
               )}
 
               <span className="text-base flex-shrink-0 leading-none">{item.emoji}</span>
@@ -189,7 +189,7 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
                 <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-xs font-bold leading-none ${
                   item.urgent
                     ? (dark ? 'bg-red-900/60 text-red-300' : 'bg-red-100 text-red-700')
-                    : (dark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600')
+                    : (dark ? 'bg-violet-900/60 text-violet-300' : 'bg-violet-100 text-violet-700')
                 }`}>
                   {item.badge}
                 </span>
@@ -197,7 +197,7 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
 
               {/* Collapsed badge dot */}
               {item.badge && collapsed && (
-                <span className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${item.urgent ? 'bg-red-500' : 'bg-blue-500'}`} />
+                <span className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${item.urgent ? 'bg-red-500' : 'bg-violet-500'}`} />
               )}
 
               {/* Tooltip on collapsed */}
@@ -222,7 +222,7 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
       {!collapsed && (
         <div className={`flex items-center gap-2.5 px-4 py-3 border-t ${dark ? 'border-gray-800' : 'border-gray-100'} flex-shrink-0`}>
           <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-            dark ? 'bg-blue-800 text-blue-200' : 'bg-blue-100 text-blue-700'
+            dark ? 'bg-violet-900 text-violet-300' : 'bg-violet-100 text-violet-700'
           }`}>AC</div>
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-semibold truncate ${text}`}>Alex Chen</p>
@@ -233,7 +233,7 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
       {collapsed && (
         <div className="flex justify-center py-3 border-t border-gray-800 flex-shrink-0">
           <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-            dark ? 'bg-blue-800 text-blue-200' : 'bg-blue-100 text-blue-700'
+            dark ? 'bg-violet-900 text-violet-300' : 'bg-violet-100 text-violet-700'
           }`}>AC</div>
         </div>
       )}
@@ -244,11 +244,11 @@ function Sidebar({ dark, activePage, onNavigate, collapsed, onCollapse }) {
 // ── Notification panel ──────────────────────────────────────────────────────
 
 function NotifPanel({ dark, notifs, onRead, onClose, panelRef }) {
-  const card    = dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+  const card    = dark ? 'bg-gray-950 border-purple-900/40' : 'bg-white border-purple-100';
   const text    = dark ? 'text-gray-100' : 'text-gray-900';
-  const muted   = dark ? 'text-gray-400' : 'text-gray-500';
-  const divider = dark ? 'border-gray-700' : 'border-gray-100';
-  const hover   = dark ? 'hover:bg-gray-700/50' : 'hover:bg-gray-50';
+  const muted   = dark ? 'text-purple-400' : 'text-gray-500';
+  const divider = dark ? 'border-purple-900/40' : 'border-purple-100';
+  const hover   = dark ? 'hover:bg-purple-900/20' : 'hover:bg-purple-50';
 
   const unread = notifs.filter(n => !n.read).length;
 
@@ -262,10 +262,10 @@ function NotifPanel({ dark, notifs, onRead, onClose, panelRef }) {
         <div className="flex items-center gap-2">
           <span className={`text-sm font-bold ${text}`}>Notifications</span>
           {unread > 0 && (
-            <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-xs font-bold text-white">{unread}</span>
+            <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-xs font-bold text-white">{unread}</span>
           )}
         </div>
-        <button onClick={() => onRead('all')} className={`text-xs font-medium ${dark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}>
+        <button onClick={() => onRead('all')} className={`text-xs font-medium ${dark ? 'text-violet-400 hover:text-violet-300' : 'text-violet-600 hover:text-violet-700'}`}>
           Mark all read
         </button>
       </div>
@@ -287,14 +287,14 @@ function NotifPanel({ dark, notifs, onRead, onClose, panelRef }) {
               </p>
               <p className={`text-xs mt-0.5 ${muted}`}>{n.time}</p>
             </div>
-            {!n.read && <span className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1.5" />}
+            {!n.read && <span className="h-2 w-2 rounded-full bg-violet-500 flex-shrink-0 mt-1.5" />}
           </button>
         ))}
       </div>
 
       {/* Footer */}
       <div className={`px-4 py-2.5 border-t ${divider}`}>
-        <button className={`text-xs font-medium ${dark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}>
+        <button className={`text-xs font-medium ${dark ? 'text-violet-400 hover:text-violet-300' : 'text-violet-600 hover:text-violet-700'}`}>
           View all notifications →
         </button>
       </div>
@@ -328,7 +328,7 @@ function ProfileDropdown({ dark, onNavigate, dropRef }) {
         <p className={`text-xs font-bold ${dark ? 'text-gray-100' : 'text-gray-900'}`}>Alex Chen</p>
         <p className={`text-xs ${muted}`}>alex@nimbusflow.io</p>
         <span className={`inline-block mt-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
-          dark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700'
+          dark ? 'bg-violet-900/40 text-violet-300' : 'bg-violet-100 text-violet-700'
         }`}>Admin</span>
       </div>
 
@@ -385,7 +385,7 @@ function Header({ dark, setDark, activePage, notifs, onNotifRead, refreshing, on
   const text    = dark ? 'text-gray-100' : 'text-gray-900';
   const muted   = dark ? 'text-gray-400' : 'text-gray-500';
   const btnCls  = `flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
-    dark ? 'border-gray-700 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+    dark ? 'border-purple-800/50 text-purple-300 hover:bg-purple-900/30' : 'border-purple-200 text-gray-600 hover:bg-purple-50'
   }`;
 
   // Breadcrumb
@@ -456,13 +456,13 @@ function Header({ dark, setDark, activePage, notifs, onNotifRead, refreshing, on
           onClick={() => { setNotifOpen(o => !o); setProfileOpen(false); }}
           className={`relative flex items-center justify-center h-8 w-8 rounded-xl transition-colors ${
             notifOpen
-              ? (dark ? 'bg-gray-700 text-blue-400' : 'bg-blue-50 text-blue-600')
-              : (dark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700')
+              ? (dark ? 'bg-purple-900/50 text-violet-400' : 'bg-violet-50 text-violet-600')
+              : (dark ? 'text-purple-400 hover:bg-purple-900/30 hover:text-purple-200' : 'text-gray-500 hover:bg-purple-50 hover:text-gray-700')
           }`}
         >
           <BellIcon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
           {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-white text-[10px] font-bold leading-none">
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-violet-600 text-white text-[10px] font-bold leading-none">
               {unread > 9 ? '9+' : unread}
             </span>
           )}
@@ -484,7 +484,7 @@ function Header({ dark, setDark, activePage, notifs, onNotifRead, refreshing, on
           }`}
         >
           <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-            dark ? 'bg-blue-800 text-blue-200' : 'bg-blue-100 text-blue-700'
+            dark ? 'bg-violet-900 text-violet-300' : 'bg-violet-100 text-violet-700'
           }`}>AC</div>
           <span className={`hidden md:block text-xs font-semibold ${text}`}>Alex</span>
           <ChevronIcon className={`hidden md:block h-3 w-3 ${muted}`} open={profileOpen} />
@@ -523,7 +523,7 @@ function MobileDrawer({ dark, activePage, onNavigate, onClose }) {
         <div className={`flex items-center justify-between h-14 px-4 border-b ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm">N</div>
-            <span className={`text-sm font-bold ${dark ? 'text-blue-400' : 'text-blue-600'}`}>NimbusFlow</span>
+            <span className={`text-sm font-bold ${dark ? 'text-violet-400' : 'text-violet-600'}`}>NimbusFlow</span>
           </div>
           <button onClick={onClose} className={`rounded-lg p-1.5 ${dark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}>
             <XIcon className="h-5 w-5" />
@@ -540,16 +540,16 @@ function MobileDrawer({ dark, activePage, onNavigate, onClose }) {
                 onClick={() => { onNavigate(item.id); onClose(); }}
                 className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors relative ${
                   active
-                    ? (dark ? 'bg-blue-900/50 text-blue-400' : 'bg-blue-50 text-blue-700')
-                    : (dark ? 'text-gray-400 hover:bg-gray-800 hover:text-gray-200' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900')
+                    ? (dark ? 'bg-violet-900/50 text-violet-400' : 'bg-violet-50 text-violet-700')
+                    : (dark ? 'text-purple-400 hover:bg-purple-900/30 hover:text-purple-200' : 'text-gray-600 hover:bg-purple-50 hover:text-gray-900')
                 }`}
               >
-                {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-blue-500" />}
+                {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r bg-violet-500" />}
                 <span className="text-base leading-none">{item.emoji}</span>
                 <span className="flex-1 text-xs text-left">{item.label}</span>
                 {item.badge && (
                   <span className={`rounded-full px-1.5 py-0.5 text-xs font-bold ${
-                    item.urgent ? (dark ? 'bg-red-900/60 text-red-300' : 'bg-red-100 text-red-700') : (dark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600')
+                    item.urgent ? (dark ? 'bg-red-900/60 text-red-300' : 'bg-red-100 text-red-700') : (dark ? 'bg-violet-900/60 text-violet-300' : 'bg-violet-100 text-violet-700')
                   }`}>{item.badge}</span>
                 )}
               </button>
@@ -587,15 +587,15 @@ function BottomNav({ dark, activePage, onNavigate }) {
             onClick={() => onNavigate(item.id)}
             className={`flex-1 flex flex-col items-center justify-center gap-1 py-2 text-xs font-medium transition-colors relative ${
               active
-                ? (dark ? 'text-blue-400' : 'text-blue-600')
-                : (dark ? 'text-gray-500 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700')
+                ? (dark ? 'text-violet-400' : 'text-violet-600')
+                : (dark ? 'text-purple-600 hover:text-purple-300' : 'text-gray-500 hover:text-gray-700')
             }`}
           >
-            {active && <span className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-b ${dark ? 'bg-blue-400' : 'bg-blue-600'}`} />}
+            {active && <span className={`absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-b ${dark ? 'bg-violet-400' : 'bg-violet-600'}`} />}
             <span className="text-lg leading-none relative">
               {item.emoji}
               {item.badge && (
-                <span className={`absolute -top-1 -right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white text-[8px] font-bold ${item.urgent ? 'bg-red-500' : 'bg-blue-600'}`}>
+                <span className={`absolute -top-1 -right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white text-[8px] font-bold ${item.urgent ? 'bg-red-500' : 'bg-violet-600'}`}>
                   {item.badge > 9 ? '9+' : item.badge}
                 </span>
               )}
@@ -677,7 +677,7 @@ export default function Layout({ children, demo = false }) {
 
   // ── Theme classes ──────────────────────────────────────────────────────
 
-  const bg   = dark ? 'bg-gray-900' : 'bg-gray-50';
+  const bg   = dark ? 'bg-gray-950' : 'bg-purple-50/30';
   const text = dark ? 'text-gray-100' : 'text-gray-900';
 
   // ── Render ─────────────────────────────────────────────────────────────

@@ -378,6 +378,34 @@ async def search_knowledge_base(
         return [dict(r) for r in rows]
 
 
+async def search_knowledge_base_text(
+    query: str,
+    max_results: int = 5,
+    category: Optional[str] = None,
+) -> list[dict]:
+    """Text/keyword fallback search when vector embedding is unavailable."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, content, category, tags, source_doc,
+                   0.5::float AS similarity
+            FROM knowledge_base
+            WHERE (
+                to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,''))
+                    @@ plainto_tsquery('english', $1)
+                OR title ILIKE '%' || $1 || '%'
+                OR content ILIKE '%' || $1 || '%'
+            )
+            AND ($3::text IS NULL OR category = $3)
+            ORDER BY title
+            LIMIT $2
+            """,
+            query, max_results, category,
+        )
+        return [dict(r) for r in rows]
+
+
 async def upsert_knowledge_base_entry(
     title: str,
     content: str,

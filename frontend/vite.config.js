@@ -18,6 +18,7 @@ export default defineConfig({
       '/health': 'http://localhost:8000',
       '/conversations': 'http://localhost:8000',
       '/customers': 'http://localhost:8000',
+      '/api': 'http://localhost:8000',
     },
   },
 })
