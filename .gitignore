@@ -7,6 +7,7 @@ secrets/
 *.json.key
 gmail-credentials.json
 gmail-token.json
+client_secret_*.json
 secrets-real.yaml
 *.real.yaml
 *.real.env

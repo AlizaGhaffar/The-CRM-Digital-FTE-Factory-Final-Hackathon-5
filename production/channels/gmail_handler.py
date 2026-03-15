@@ -291,6 +291,40 @@ class GmailHandler:
         log.info("gmail.messages_fetched", count=len(messages), history_id=history_id)
         return messages
 
+    async def poll_inbox(self, max_results: int = 10) -> list[dict]:
+        """
+        Polling fallback — list recent UNREAD inbox messages without needing
+        a Pub/Sub history_id.  Used when GMAIL_PUBSUB_TOPIC is not configured.
+        """
+        service = self._build_service()
+
+        def _list_messages():
+            return (
+                service.users()
+                .messages()
+                .list(
+                    userId=self.user_id,
+                    labelIds=["INBOX", "UNREAD"],
+                    maxResults=max_results,
+                )
+                .execute()
+            )
+
+        try:
+            result = await self._with_retry(_list_messages, "messages.list.unread")
+        except HttpError as exc:
+            log.error("gmail.poll_inbox_failed", error=str(exc))
+            return []
+
+        messages = []
+        for item in result.get("messages", []):
+            msg = await self.get_message(item["id"])
+            if msg:
+                messages.append(msg)
+
+        log.info("gmail.poll_inbox", count=len(messages))
+        return messages
+
     async def get_message(self, message_id: str) -> Optional[dict]:
         """
         Fetch a single Gmail message by ID and return a normalized dict.
@@ -492,6 +526,10 @@ class GmailHandler:
             log.error("gmail.reply_failed", to=to_email, error=str(exc))
             return {"channel_message_id": "", "delivery_status": "failed", "error": str(exc)}
 
+    async def send_email(self, to: str, subject: str, body: str) -> dict:
+        """Send a new outbound email (no thread context). Used by landing-page ack flow."""
+        return await self.send_reply(to_email=to, subject=subject, body=body)
+
     async def send_reply_async(
         self,
         to_email: str,
@@ -615,3 +653,12 @@ async def fetch_new_messages(history_id: str) -> list[dict]:
     """
     handler = GmailHandler()
     return await handler._fetch_messages_since(history_id)
+
+
+async def poll_inbox(max_results: int = 10) -> list[dict]:
+    """
+    Convenience wrapper: poll Gmail inbox for recent unread messages.
+    Use when Pub/Sub is not configured (GMAIL_PUBSUB_TOPIC is a placeholder).
+    """
+    handler = GmailHandler()
+    return await handler.poll_inbox(max_results=max_results)

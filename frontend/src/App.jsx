@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Layout from '../components/Layout'
+import LandingPage from '../components/LandingPage'
 import SupportForm from '../components/SupportForm'
 import AdminDashboard from '../components/AdminDashboard'
 import EscalationsQueue from '../components/EscalationsQueue'
@@ -21,8 +22,9 @@ function AdminLayout() {
 export default function App() {
   return (
     <Routes>
-      {/* Public: Customer Support Form */}
-      <Route path="/" element={<SupportForm apiEndpoint="/support/submit" />} />
+      {/* Public: Landing Page */}
+      <Route path="/" element={<LandingPage />} />
+      {/* Public: Support Form (also opened as modal from landing page) */}
       <Route path="/support" element={<SupportForm apiEndpoint="/support/submit" />} />
       <Route path="/ticket/:ticketId" element={<TicketStatus />} />
 
